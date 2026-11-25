@@ -4,6 +4,7 @@ let io = null;
 
 const allowedOrigins = [
   'http://localhost:3000',
+  'http://localhost:5273',
   'http://localhost:5173',
   'http://localhost:5174',
   'http://localhost:5175',
@@ -70,20 +71,22 @@ function emitDataChange(entityType = 'all', payload = null) {
 }
 
 /**
- * Notify connected clients that a user's active session was replaced by a new login
+ * Emit a session replacement event so any previous active session for this user is immediately logged out
  * @param {number|string} userid
- * @param {string} newSid
+ * @param {string} sessionId
  */
-function emitSessionReplaced(userid, newSid) {
-  if (!io) return;
+function emitSessionReplaced(userid, sessionId) {
+  if (!io || !userid || !sessionId) return;
   try {
     io.emit('session_replaced', {
       userid: Number(userid),
-      newSid,
+      sessionId: String(sessionId),
+      message: 'Your account was signed in from another device or browser.',
       timestamp: Date.now(),
     });
+    console.log(`[Socket.io] Broadcasted session_replaced for userid=${userid}`);
   } catch (err) {
-    console.error('[Socket.io] emitSessionReplaced error:', err);
+    console.error('[Socket.io] session_replaced broadcast error:', err);
   }
 }
 

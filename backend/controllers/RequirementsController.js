@@ -1192,10 +1192,14 @@ const getAssignedUsers = async (req, res) => {
       filtered = merged.filter(u => Number(u.userid) === actorId);
     }
 
+    const { calculateStandardCompliance } = require('../utils/evidenceService');
+    const compliance = await calculateStandardCompliance(db, numReqId, numOfficeId || null);
+
     res.json({
       success: true,
       data: filtered,
-      users: filtered
+      users: filtered,
+      compliance
     });
   } catch (error) {
     console.error('Error fetching assigned users:', error);
@@ -1596,15 +1600,9 @@ const markUserAsUploaded = async (req, res) => {
       [requirementid, userid]
     );
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Assignment not found for this user and requirement'
-      });
-    }
-
     res.json({
       success: true,
+      updated: Number(result?.affectedRows || 0) > 0,
       message: 'User marked as uploaded successfully'
     });
   } catch (error) {

@@ -10,19 +10,6 @@ export default function AddAreaForm({ fieldClass, saving, areaForm, setAreaForm,
 			className="space-y-4 rounded-xl border border-blue-100 bg-white px-6 py-5 shadow-sm"
 		>
 			<div>
-				<label htmlFor="area-name" className="mb-1 block text-sm font-semibold text-slate-700">
-					Area Name
-				</label>
-				<input
-					id="area-name"
-					className={areaFieldClass || fieldClass}
-					placeholder="AREA"
-					value={areaForm.areaname}
-					disabled={saving}
-					onChange={(e) => setAreaForm((prev) => ({ ...prev, areaname: e.target.value }))}
-				/>
-			</div>
-			<div>
 				<label htmlFor="area-code" className="mb-1 block text-sm font-semibold text-slate-700">
 					Area Code
 				</label>
@@ -33,6 +20,19 @@ export default function AddAreaForm({ fieldClass, saving, areaForm, setAreaForm,
 					value={areaForm.areacode}
 					disabled={saving}
 					onChange={(e) => setAreaForm((prev) => ({ ...prev, areacode: e.target.value }))}
+				/>
+			</div>
+			<div>
+				<label htmlFor="area-name" className="mb-1 block text-sm font-semibold text-slate-700">
+					Area Name
+				</label>
+				<input
+					id="area-name"
+					className={areaFieldClass || fieldClass}
+					placeholder="AREA"
+					value={areaForm.areaname}
+					disabled={saving}
+					onChange={(e) => setAreaForm((prev) => ({ ...prev, areaname: e.target.value }))}
 				/>
 			</div>
 			<div className="flex justify-end border-t border-blue-100 pt-4">

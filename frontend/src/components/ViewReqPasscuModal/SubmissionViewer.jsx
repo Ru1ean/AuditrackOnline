@@ -153,6 +153,7 @@ export default function SubmissionViewer({
 	unsubmittingFile = false,
 }) {
 	const { showConfirm } = useModal();
+	const isViewerAdmin = Number(viewerRoleId || currentUser?.roleid || 0) === 1;
 	const isViewerAuditor = Number(viewerRoleId || currentUser?.roleid || 0) === 4 ||
 		String(currentUser?.rolename || '').toLowerCase().includes('auditor') ||
 		String(currentUser?.Position || '').toLowerCase().includes('auditor') ||
@@ -208,6 +209,44 @@ export default function SubmissionViewer({
 	const [thumbByUserId, setThumbByUserId] = useState({});
 	const [thumbLoadingByUserId, setThumbLoadingByUserId] = useState({});
 	const [savedComment, setSavedComment] = useState('');
+	const [standardCompliance, setStandardCompliance] = useState(null);
+
+	useEffect(() => {
+		if (!show || !requirementid) {
+			setStandardCompliance(null);
+			return;
+		}
+		let cancelled = false;
+		const fetchCompliance = async () => {
+			try {
+				const token = localStorage.getItem('token');
+				const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+				const res = await fetch(
+					`${API_BASE_URL}/api/requirements/${requirementid}/compliance${officeid ? `?officeid=${officeid}` : ''}`,
+					{ headers }
+				);
+				if (!res.ok) return;
+				const data = await res.json();
+				if (!cancelled && data?.success && data.compliance) {
+					setStandardCompliance(data.compliance);
+				}
+			} catch (err) {}
+		};
+		fetchCompliance();
+
+		const handleReviewed = (ev) => {
+			if (ev?.detail?.compliance && Number(ev.detail.reqId) === Number(requirementid)) {
+				setStandardCompliance(ev.detail.compliance);
+			} else {
+				fetchCompliance();
+			}
+		};
+		window.addEventListener('evidence-file-reviewed', handleReviewed);
+		return () => {
+			cancelled = true;
+			window.removeEventListener('evidence-file-reviewed', handleReviewed);
+		};
+	}, [show, requirementid, officeid, filesByUserId]);
 	const [savedCommentAt, setSavedCommentAt] = useState(null);
 	const [commentInput, setCommentInput] = useState('');
 	const [savingComment, setSavingComment] = useState(false);
@@ -766,7 +805,90 @@ export default function SubmissionViewer({
 
 				<div className="min-h-0 flex-1 overflow-y-auto bg-app">
 					<div className="flex min-h-full flex-col p-4">
-
+						{standardCompliance && (
+							<div className="mb-4 rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
+								<div className="flex items-center justify-between gap-2">
+									<div>
+										<div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+											Standard Compliance Percentage
+										</div>
+										<div className="mt-0.5 flex items-center gap-2 flex-wrap">
+											<span className="text-lg font-bold text-slate-900">
+												{standardCompliance.approvalRate}%
+											</span>
+											{standardCompliance.derivedStatusName && (
+												<span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border ${
+													standardCompliance.derivedStatusId === 5
+														? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+														: standardCompliance.derivedStatusId === 4
+														? 'bg-amber-50 text-amber-700 border-amber-200'
+														: standardCompliance.derivedStatusId === 3
+														? 'bg-rose-50 text-rose-700 border-rose-200'
+														: 'bg-slate-100 text-slate-600 border-slate-200'
+												}`}>
+													{standardCompliance.derivedStatusName}
+												</span>
+											)}
+											{!standardCompliance.hasEvidence && (
+												<span className="text-xs font-medium text-slate-500">
+													No Evidence Submitted
+												</span>
+											)}
+										</div>
+									</div>
+									<div className="text-right text-[11px] text-slate-500">
+										<div>Assigned Personnel: <span className="font-bold text-slate-800">{standardCompliance.assignedPersonnelCount}</span></div>
+										<div>Total Submitted: <span className="font-bold text-slate-800">{standardCompliance.totalRecords}</span></div>
+									</div>
+								</div>
+								{isViewerAdmin && (
+									<div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+										<div
+											className={`h-full rounded-full transition-all duration-300 ${
+												standardCompliance.approvalRate >= 100
+													? 'bg-emerald-500'
+													: standardCompliance.approvalRate > 0
+													? 'bg-blue-500'
+													: 'bg-slate-300'
+											}`}
+											style={{ width: `${Math.min(100, Math.max(0, Number(standardCompliance.approvalRate || 0)))}%` }}
+										/>
+									</div>
+								)}
+								<div className="mt-2.5 grid grid-cols-3 gap-2 text-center">
+									<div className="rounded-lg bg-emerald-50 border border-emerald-200/80 px-2 py-1.5">
+										<div className="text-[10px] font-semibold text-emerald-700">Approved</div>
+										<div className="text-sm font-bold text-emerald-800">{standardCompliance.approvedCount}</div>
+									</div>
+									<div className="rounded-lg bg-amber-50 border border-amber-200/80 px-2 py-1.5">
+										<div className="text-[10px] font-semibold text-amber-700">Pending</div>
+										<div className="text-sm font-bold text-amber-800">{standardCompliance.pendingCount}</div>
+									</div>
+									<div className="rounded-lg bg-rose-50 border border-rose-200/80 px-2 py-1.5">
+										<div className="text-[10px] font-semibold text-rose-700">Rejected</div>
+										<div className="text-sm font-bold text-rose-800">{standardCompliance.rejectedCount}</div>
+									</div>
+								</div>
+								{Array.isArray(standardCompliance.personnelBreakdown) && standardCompliance.personnelBreakdown.length > 0 && !isYourWorkView && (
+									<div className="mt-3 border-t border-slate-100 pt-2.5 space-y-1.5">
+										<div className="text-[11px] font-semibold text-slate-600">Per-Personnel Evidence Breakdown</div>
+										{standardCompliance.personnelBreakdown.map((p) => (
+											<div key={p.userid} className="flex items-center justify-between text-[11px] text-slate-600">
+												<span className="truncate font-medium text-slate-800 max-w-[160px]">{p.fullname}</span>
+												<span className="flex items-center gap-2 shrink-0">
+													<span className="text-emerald-700 font-semibold">{p.approvedCount}A</span>
+													<span className="text-amber-700 font-semibold">{p.pendingCount}P</span>
+													<span className="text-rose-700 font-semibold">{p.rejectedCount}R</span>
+													<span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-700">
+														{p.activeCount}/{p.maxSlots || 40}
+													</span>
+												</span>
+											</div>
+										))}
+									</div>
+								)}
+							</div>
+						)}
 
 						{isYourWorkView && (
 							<YourWorkFileUpload

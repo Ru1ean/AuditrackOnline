@@ -22,6 +22,13 @@ const STATUS = {
         dot: 'bg-rose-500',
         border: 'border-rose-200',
     },
+    2: {
+        label: 'Non-Existent',
+        bg: 'bg-slate-100',
+        text: 'text-slate-600',
+        dot: 'bg-slate-400',
+        border: 'border-slate-200',
+    },
     0: {
         label: 'No Standards',
         bg: 'bg-slate-100',

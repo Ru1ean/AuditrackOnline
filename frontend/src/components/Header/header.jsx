@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Bell, Menu, User, LogOut, ChevronDown, Building2 } from 'lucide-react';
 import { usersAPI } from '../../utils/api';
+import { forceLogoutReplacedSession } from '../../utils/socket';
 import NotificationPopup from '../notif/notif';
 import { API_BASE_URL } from '../../utils/apiBase';
 import { toggleMobileNavbar } from '../Navigation/navbar';
@@ -90,16 +91,21 @@ export default function Header({ onToggleMobileMenu, isAdmin: propIsAdmin }) {
     };
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setShowProfileMenu(false);
-    try {
-      usersAPI.logout?.().catch(() => {});
-    } catch {}
+    const token = localStorage.getItem('token');
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    localStorage.removeItem('name');
     localStorage.removeItem('sessionId');
+    localStorage.removeItem('name');
+    try {
+      sessionStorage.removeItem('sessionReplacedMessage');
+    } catch {}
     delete axios.defaults.headers.common['Authorization'];
+    await usersAPI.logout(token);
+    try {
+      sessionStorage.removeItem('sessionReplacedMessage');
+    } catch {}
     navigate('/login');
   };
 
@@ -125,6 +131,14 @@ export default function Header({ onToggleMobileMenu, isAdmin: propIsAdmin }) {
             'Content-Type': 'application/json',
           },
         });
+        if (response.status === 401) {
+          if (!localStorage.getItem('token')) return;
+          const errData = await response.json().catch(() => ({}));
+          if (errData?.code === 'SESSION_REPLACED') {
+            forceLogoutReplacedSession(errData?.message);
+            return;
+          }
+        }
         if (response.ok) {
           const data = await response.json();
           const unread = Number(data?.data?.unread ?? data?.unread ?? 0);

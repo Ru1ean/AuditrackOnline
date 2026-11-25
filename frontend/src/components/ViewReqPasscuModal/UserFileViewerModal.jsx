@@ -2,6 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { downloadFileFromUrl, fileNameFromUrl } from '../../utils/downloadFile';
 import { usersAPI } from '../../utils/api';
+import { API_BASE_URL } from '../../utils/apiBase';
+
+function resolveFileUrl(raw) {
+    const str = String(raw || '').trim();
+    if (!str) return '';
+    if (/^https?:\/\//i.test(str) || str.startsWith('data:') || str.startsWith('blob:')) return str;
+    return `${API_BASE_URL}${str.startsWith('/') ? '' : '/'}${str}`;
+}
 
 export default function UserFileViewerModal({
     show,
@@ -46,7 +54,7 @@ export default function UserFileViewerModal({
 
     if (!show || !selectedUserFile) return null;
 
-    const url = String(selectedUserFile?.url || selectedUserFile?.filepath || '');
+    const url = resolveFileUrl(selectedUserFile?.url || selectedUserFile?.filepath || '');
     const rawName = String(selectedUserFile?.displayname || selectedUserFile?.filename || '').trim() || fileNameFromUrl(url);
     const extMatch = (selectedUserFile?.filename || url).match(/\.([a-zA-Z0-9]+)(?:\?|#|$)/);
     const ext = extMatch ? extMatch[1] : '';

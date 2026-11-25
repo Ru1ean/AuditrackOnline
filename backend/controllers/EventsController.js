@@ -513,7 +513,7 @@ const deleteEvents = async (req, res) => {
     // Delete events
       const placeholders = eventIds.map(() => '?').join(',');
 
-      // 1. Clean up requirements under criteria linked to these events (or under areas of these events)
+      // 1. Clean up requirements, criteria, areas, and department links for these events
       try {
         const [targetCriteria] = await db.query(
           `SELECT criteriaid FROM criteria WHERE eventid IN (${placeholders}) OR areaid IN (SELECT areaid FROM areas WHERE eventid IN (${placeholders}))`,
@@ -527,6 +527,9 @@ const deleteEvents = async (req, res) => {
             await db.query(`DELETE FROM requirementuserassignments WHERE requirementid IN (SELECT requirementid FROM requirements WHERE criteriaid IN (${critPlaceholders}))`, critIds);
             await db.query(`DELETE FROM compliancestatusoffices WHERE requirementid IN (SELECT requirementid FROM requirements WHERE criteriaid IN (${critPlaceholders}))`, critIds);
             await db.query(`DELETE FROM requirements WHERE criteriaid IN (${critPlaceholders})`, critIds);
+            await db.query(`DELETE FROM criteriacommentsoffices WHERE criteriaid IN (${critPlaceholders})`, critIds);
+            await db.query(`UPDATE criteria SET parentcriteriaid = NULL WHERE criteriaid IN (${critPlaceholders})`, critIds);
+            await db.query(`DELETE FROM criteria WHERE criteriaid IN (${critPlaceholders})`, critIds);
           }
         }
         // Cleanup any remaining orphaned requirements
@@ -534,8 +537,21 @@ const deleteEvents = async (req, res) => {
         await db.query(`DELETE FROM requirementuserassignments WHERE requirementid IN (SELECT requirementid FROM requirements WHERE criteriaid IS NULL OR criteriaid NOT IN (SELECT criteriaid FROM criteria))`);
         await db.query(`DELETE FROM compliancestatusoffices WHERE requirementid IN (SELECT requirementid FROM requirements WHERE criteriaid IS NULL OR criteriaid NOT IN (SELECT criteriaid FROM criteria))`);
         await db.query(`DELETE FROM requirements WHERE criteriaid IS NULL OR criteriaid NOT IN (SELECT criteriaid FROM criteria)`);
+
+        // 2. Clean up auditor assignments and areas for these events
+        await db.query(`DELETE FROM auditorareaassignments WHERE areaid IN (SELECT areaid FROM areas WHERE eventid IN (${placeholders}))`, eventIds);
+        await db.query(`DELETE FROM areas WHERE eventid IN (${placeholders})`, eventIds);
+
+        // 3. Unlink offices from eventdepartments & events before deleting eventdepartments
+        await db.query(
+          `UPDATE offices SET eventdepartmentid = NULL WHERE eventdepartmentid IN (SELECT id FROM eventdepartments WHERE eventid IN (${placeholders}))`,
+          eventIds
+        );
+        await db.query(`UPDATE offices SET eventid = NULL WHERE eventid IN (${placeholders})`, eventIds);
+        await db.query(`DELETE FROM eventdepartments WHERE eventid IN (${placeholders})`, eventIds);
       } catch (cascadeErr) {
-        console.error('Error during cascading requirement cleanup in deleteEvents:', cascadeErr);
+        console.error('Error during cascading cleanup in deleteEvents:', cascadeErr);
+        throw cascadeErr;
       }
 
       // Fetch names and codes for logging before deletion
@@ -1104,8 +1120,18 @@ const downloadEventZip = async (req, res) => {
 
       try {
         if (filepath.startsWith('http://') || filepath.startsWith('https://')) {
+          // Stored URLs may point at an old/public Supabase host (e.g. localhost:8000) that is
+          // unreachable from inside the backend container. Rewrite storage URLs to the
+          // internal Supabase URL so the file can actually be fetched.
+          let fetchUrl = filepath;
+          const storageMarker = '/storage/v1/object/public/';
+          const markerIdx = filepath.indexOf(storageMarker);
+          const internalBase = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
+          if (markerIdx !== -1 && internalBase && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(filepath)) {
+            fetchUrl = `${internalBase}${filepath.slice(markerIdx)}`;
+          }
           // Fetch remote file buffer (handles 301/302 redirects automatically)
-          const resp = await axios.get(filepath, { 
+          const resp = await axios.get(fetchUrl, { 
             responseType: 'arraybuffer', 
             timeout: 30000 
           });
@@ -1120,7 +1146,7 @@ const downloadEventZip = async (req, res) => {
           }
         }
       } catch (fileErr) {
-        console.warn(`Skipping file ${file.filename}:`, fileErr.message);
+        console.warn(`Skipping file ${file.filename}:`, fileErr.message || fileErr.code || String(fileErr));
       }
     }
 

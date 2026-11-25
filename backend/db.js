@@ -14,6 +14,7 @@ const isLocal =
   dbUrl.includes('@db:') ||
   dbUrl.includes('@supavisor:') ||
   dbUrl.includes('@supabase-db:') ||
+  dbUrl.includes('@auditrack-supabase-db:') ||
   process.env.DB_SSL === 'false';
 
 const sql = postgres(dbUrl, {
@@ -34,47 +35,64 @@ const sql = postgres(dbUrl, {
   }
 });
 
+function preparePgQuery(text, params) {
+  let pgText = text;
+  if (params && params.length > 0) {
+    let index = 1;
+    // Convert ? placeholders to $1, $2, etc.
+    pgText = text.replace(/\?/g, () => `$${index++}`);
+  }
+
+  // Convert INSERT IGNORE INTO (MySQL) to PostgreSQL ON CONFLICT DO NOTHING
+  if (/\bINSERT\s+IGNORE\s+INTO\b/i.test(pgText)) {
+    pgText = pgText.replace(/\bINSERT\s+IGNORE\s+INTO\b/gi, 'INSERT INTO');
+    if (!/\bon\s+conflict\b/i.test(pgText)) {
+      pgText += ' ON CONFLICT DO NOTHING';
+    }
+  }
+
+  // Strip MySQL backtick identifiers only; preserve PostgreSQL double-quoted identifiers for alias casing
+  pgText = pgText.replace(/`/g, '');
+
+  // If it is an INSERT statement, automatically append RETURNING * to get auto-increment ID
+  if (/^\s*insert\s+into\s+/i.test(pgText) && !/\breturning\b/i.test(pgText)) {
+    pgText += ' RETURNING *';
+  }
+
+  const cleanParams = (params || []).map(p => (p === undefined ? null : p));
+  return { pgText, cleanParams };
+}
+
+function decorateResult(result) {
+  result.affectedRows = result.count;
+  if (result.length > 0) {
+    const row = result[0];
+    result.insertId = row.id ?? row.areaid ?? row.criteriaid ?? row.requirementid ?? row.eventid ?? row.userid ?? row.officeid ?? Object.values(row)[0];
+  }
+  return [result, result];
+}
+
 const db = {
   query: async (text, params) => {
-    let pgText = text;
-    if (params && params.length > 0) {
-      let index = 1;
-      // Convert ? placeholders to $1, $2, etc.
-      pgText = text.replace(/\?/g, () => `$${index++}`);
-    }
-
-    // Convert INSERT IGNORE INTO (MySQL) to PostgreSQL ON CONFLICT DO NOTHING
-    if (/\bINSERT\s+IGNORE\s+INTO\b/i.test(pgText)) {
-      pgText = pgText.replace(/\bINSERT\s+IGNORE\s+INTO\b/gi, 'INSERT INTO');
-      if (!/\bon\s+conflict\b/i.test(pgText)) {
-        pgText += ' ON CONFLICT DO NOTHING';
-      }
-    }
-
-    // Strip backticks or quotes around identifiers
-    // Strip MySQL backtick identifiers only; preserve PostgreSQL double-quoted identifiers for alias casing
-    pgText = pgText.replace(/`/g, '');
-
-    // If it is an INSERT statement, automatically append RETURNING * to get auto-increment ID
-    if (/^\s*insert\s+into\s+/i.test(pgText) && !/\breturning\b/i.test(pgText)) {
-      pgText += ' RETURNING *';
-    }
-
-    const cleanParams = (params || []).map(p => (p === undefined ? null : p));
-
-    // Pure direct execution without any runtime maps or conversions
+    const { pgText, cleanParams } = preparePgQuery(text, params);
     const result = await sql.unsafe(pgText, cleanParams);
-
-    result.affectedRows = result.count;
-    if (result.length > 0) {
-      const row = result[0];
-      result.insertId = row.id ?? row.areaid ?? row.criteriaid ?? row.requirementid ?? row.eventid ?? row.userid ?? row.officeid ?? Object.values(row)[0];
-    }
-
-    return [result, result];
+    return decorateResult(result);
   },
   execute: async (text, params) => {
     return db.query(text, params);
+  },
+  withTransaction: async (fn) => {
+    return sql.begin(async (tx) => {
+      const txDb = {
+        query: async (text, params) => {
+          const { pgText, cleanParams } = preparePgQuery(text, params);
+          const result = await tx.unsafe(pgText, cleanParams);
+          return decorateResult(result);
+        },
+        execute: async (text, params) => txDb.query(text, params)
+      };
+      return fn(txDb);
+    });
   }
 };
 

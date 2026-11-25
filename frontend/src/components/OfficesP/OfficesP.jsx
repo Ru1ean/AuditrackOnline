@@ -428,7 +428,7 @@ const OfficesP = forwardRef(
         const getStatusKey = (office) => {
             const totalReqs = Number(office?.totalrequirements ?? 0);
             const s = (office?.overallstatus || '').toLowerCase().trim();
-            if (totalReqs === 0 || s.includes('no standard') || s.includes('no req') || s === 'n/a' || s === 'empty') {
+            if (totalReqs === 0 || s.includes('no standard') || s.includes('no req') || s === 'n/a' || s === 'empty' || s.includes('non-existent')) {
                 return 'no_standards';
             }
             // common variations from DB: 'Complied', 'Partially Complied', 'Not Complied',
@@ -1055,7 +1055,7 @@ const OfficesP = forwardRef(
                                 {/* Department Programs List/Grid */}
                                 <div className="p-3 bg-slate-50/20">
                                     {viewMode === 'grid' ? (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 [&>*]:min-w-0">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 [&>*]:min-w-0">
                                             {deptGroup.programs.map(renderOfficeCard)}
                                         </div>
                                     ) : (
@@ -1105,7 +1105,7 @@ const OfficesP = forwardRef(
                             {/* Non-Academic Programs List/Grid */}
                             <div className="p-3 bg-slate-50/20">
                                 {viewMode === 'grid' ? (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 [&>*]:min-w-0">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 [&>*]:min-w-0">
                                         {nonAcademicOffices.map(renderOfficeCard)}
                                     </div>
                                 ) : (

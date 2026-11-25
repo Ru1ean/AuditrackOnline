@@ -3,21 +3,24 @@ const ExcelJS = require("exceljs");
 const { recordLog } = require('./logsController');
 const { createNotifications } = require('../utils/notificationService');
 const { autoAssignHeadsToRequirementsForOffice } = require('./RequirementsController');
+const { ensureEvidenceSchema, deriveComplianceStatus } = require('../utils/evidenceService');
 const fs = require('fs');
 const path = require('path');
 const MAX_HEADS_PER_OFFICE = 4;
 
 const normalizeComplianceStatus = (statusid, statusname) => {
   const id = Number(statusid);
-  if (id === 5) return 'Compiled';
-  if (id === 4) return 'Partially Compiled';
-  if (id === 3) return 'Not Compiled';
+  if (id === 5) return 'Complied';
+  if (id === 4) return 'Partially Complied';
+  if (id === 3) return 'Not Complied';
+  if (id === 2) return 'Non-Existent';
 
   const normalized = String(statusname || '').trim().toLowerCase();
-  if (normalized.includes('partial')) return 'Partially Compiled';
-  if (normalized.includes('not')) return 'Not Compiled';
-  if (normalized.includes('comp')) return 'Compiled';
-  return 'Not Compiled';
+  if (normalized.includes('non') || normalized.includes('none')) return 'Non-Existent';
+  if (normalized.includes('partial')) return 'Partially Complied';
+  if (normalized.includes('not')) return 'Not Complied';
+  if (normalized.includes('comp')) return 'Complied';
+  return 'Not Complied';
 };
 
 const normalizeHeadIds = (headIds, headid) => {
@@ -224,28 +227,35 @@ const OfficesController = {
           LEFT JOIN officetypes ot ON o.officetypeid = ot.officetypeid
           LEFT JOIN (
             SELECT
-              cso.officeid,
+              req_stats.officeid,
               COUNT(*) AS totalrequirements,
-              SUM(CASE WHEN cso.Status::text = '5' THEN 1 ELSE 0 END) AS compliedcount,
-              SUM(CASE WHEN cso.Status::text = '4' THEN 1 ELSE 0 END) AS partiallycompliedcount,
-              SUM(CASE WHEN cso.Status::text = '3' THEN 1 ELSE 0 END) AS notcompliedcount,
-              CASE
-                WHEN COUNT(*) = 0 THEN 0
-                ELSE ROUND(
-                  (((SUM(CASE WHEN cso.Status::text = '5' THEN 1.0 ELSE 0.0 END) * 100.0) +
-                  (SUM(CASE WHEN cso.Status::text = '4' THEN 1.0 ELSE 0.0 END) * 50.0)) /
-                  NULLIF(COUNT(*), 0))::numeric,
-                  2
-                )
-              END AS compliancepercent,
+              SUM(CASE WHEN req_stats.total_files > 0 AND req_stats.approved_files = req_stats.total_files THEN 1 ELSE 0 END) AS compliedcount,
+              SUM(CASE WHEN req_stats.total_files > 0 AND req_stats.approved_files > 0 AND req_stats.approved_files < req_stats.total_files THEN 1 ELSE 0 END) AS partiallycompliedcount,
+              SUM(CASE WHEN req_stats.total_files = 0 OR req_stats.approved_files = 0 THEN 1 ELSE 0 END) AS notcompliedcount,
+              ROUND(COALESCE(AVG(req_stats.req_pct), 0)::numeric, 2) AS compliancepercent,
               CASE
                 WHEN COUNT(*) = 0 THEN 'No Standards'
-                WHEN SUM(CASE WHEN cso.Status::text = '5' THEN 1 ELSE 0 END) = COUNT(*) THEN 'Complied'
-                WHEN SUM(CASE WHEN cso.Status::text = '3' THEN 1 ELSE 0 END) = COUNT(*) THEN 'Not Complied'
+                WHEN SUM(req_stats.total_files) = 0 THEN 'Non-Existent'
+                WHEN SUM(CASE WHEN req_stats.total_files > 0 AND req_stats.approved_files = req_stats.total_files THEN 1 ELSE 0 END) = COUNT(*) THEN 'Complied'
+                WHEN SUM(req_stats.approved_files) = 0 THEN 'Not Complied'
                 ELSE 'Partially Complied'
               END AS overallstatus
-            FROM compliancestatusoffices cso
-            GROUP BY cso.officeid
+            FROM (
+              SELECT
+                cso.officeid,
+                cso.requirementid,
+                COUNT(opd.id) AS total_files,
+                SUM(CASE WHEN LOWER(COALESCE(opd.reviewstatus, 'pending')) = 'approved' THEN 1 ELSE 0 END) AS approved_files,
+                CASE
+                  WHEN COUNT(opd.id) = 0 THEN 0.0
+                  ELSE (SUM(CASE WHEN LOWER(COALESCE(opd.reviewstatus, 'pending')) = 'approved' THEN 1.0 ELSE 0.0 END) * 100.0 / COUNT(opd.id))
+                END AS req_pct
+              FROM compliancestatusoffices cso
+              LEFT JOIN officeproofdocuments opd
+                ON opd.officeid = cso.officeid AND opd.requirementid = cso.requirementid
+              GROUP BY cso.officeid, cso.requirementid
+            ) req_stats
+            GROUP BY req_stats.officeid
           ) os ON o.officeid = os.officeid
           ${officeWhere}
         `),
@@ -472,28 +482,35 @@ const OfficesController = {
         LEFT JOIN officetypes t ON o.officetypeid = t.officetypeid
         LEFT JOIN (
           SELECT
-            cso.officeid,
+            req_stats.officeid,
             COUNT(*) AS totalrequirements,
-            SUM(CASE WHEN cso.Status::text = '5' THEN 1 ELSE 0 END) AS compliedcount,
-            SUM(CASE WHEN cso.Status::text = '4' THEN 1 ELSE 0 END) AS partiallycompliedcount,
-            SUM(CASE WHEN cso.Status::text = '3' THEN 1 ELSE 0 END) AS notcompliedcount,
-            CASE
-              WHEN COUNT(*) = 0 THEN 0
-              ELSE ROUND(
-                (((SUM(CASE WHEN cso.Status::text = '5' THEN 1.0 ELSE 0.0 END) * 100.0) +
-                (SUM(CASE WHEN cso.Status::text = '4' THEN 1.0 ELSE 0.0 END) * 50.0)) /
-                NULLIF(COUNT(*), 0))::numeric,
-                2
-              )
-            END AS compliancepercent,
+            SUM(CASE WHEN req_stats.total_files > 0 AND req_stats.approved_files = req_stats.total_files THEN 1 ELSE 0 END) AS compliedcount,
+            SUM(CASE WHEN req_stats.total_files > 0 AND req_stats.approved_files > 0 AND req_stats.approved_files < req_stats.total_files THEN 1 ELSE 0 END) AS partiallycompliedcount,
+            SUM(CASE WHEN req_stats.total_files = 0 OR req_stats.approved_files = 0 THEN 1 ELSE 0 END) AS notcompliedcount,
+            ROUND(COALESCE(AVG(req_stats.req_pct), 0)::numeric, 2) AS compliancepercent,
             CASE
               WHEN COUNT(*) = 0 THEN 'No Standards'
-              WHEN SUM(CASE WHEN cso.Status::text = '5' THEN 1 ELSE 0 END) = COUNT(*) THEN 'Complied'
-              WHEN SUM(CASE WHEN cso.Status::text = '3' THEN 1 ELSE 0 END) = COUNT(*) THEN 'Not Complied'
+              WHEN SUM(req_stats.total_files) = 0 THEN 'Non-Existent'
+              WHEN SUM(CASE WHEN req_stats.total_files > 0 AND req_stats.approved_files = req_stats.total_files THEN 1 ELSE 0 END) = COUNT(*) THEN 'Complied'
+              WHEN SUM(req_stats.approved_files) = 0 THEN 'Not Complied'
               ELSE 'Partially Complied'
             END AS overallstatus
-          FROM compliancestatusoffices cso
-          GROUP BY cso.officeid
+          FROM (
+            SELECT
+              cso.officeid,
+              cso.requirementid,
+              COUNT(opd.id) AS total_files,
+              SUM(CASE WHEN LOWER(COALESCE(opd.reviewstatus, 'pending')) = 'approved' THEN 1 ELSE 0 END) AS approved_files,
+              CASE
+                WHEN COUNT(opd.id) = 0 THEN 0.0
+                ELSE (SUM(CASE WHEN LOWER(COALESCE(opd.reviewstatus, 'pending')) = 'approved' THEN 1.0 ELSE 0.0 END) * 100.0 / COUNT(opd.id))
+              END AS req_pct
+            FROM compliancestatusoffices cso
+            LEFT JOIN officeproofdocuments opd
+              ON opd.officeid = cso.officeid AND opd.requirementid = cso.requirementid
+            GROUP BY cso.officeid, cso.requirementid
+          ) req_stats
+          GROUP BY req_stats.officeid
         ) os ON o.officeid = os.officeid
         LEFT JOIN Events e ON o.eventid = e.eventid
         WHERE o.officeid = ?
@@ -1103,15 +1120,26 @@ const OfficesController = {
           }
         }
 
-        await db.query(`DELETE FROM requirement_user_uploads WHERE requirementid IN (SELECT requirementid FROM compliancestatusoffices WHERE officeid IN (${placeholders}))`, ids);
-        await db.query(`DELETE FROM officeproofdocuments WHERE officeid IN (${placeholders})`, ids);
-        await db.query(`DELETE FROM requirementuserassignments WHERE officeid IN (${placeholders})`, ids);
-        await db.query(`DELETE FROM compliancestatusoffices WHERE officeid IN (${placeholders})`, ids);
-        await db.query(`DELETE FROM officeheadassignments WHERE officeid IN (${placeholders})`, ids);
-        await db.query(`DELETE FROM OverallOfficeStatus WHERE officeid IN (${placeholders})`, ids);
       } catch (e) {
-        console.warn('Cleanup child records warning during bulk office delete:', e.message);
+        console.warn('Cleanup proof files warning during bulk office delete:', e.message);
       }
+
+      const optionalChildDeletes = [
+        `DELETE FROM requirement_user_uploads WHERE requirementid IN (SELECT requirementid FROM compliancestatusoffices WHERE officeid IN (${placeholders}))`,
+        `DELETE FROM OverallOfficeStatus WHERE officeid IN (${placeholders})`,
+      ];
+      for (const sql of optionalChildDeletes) {
+        try {
+          await db.query(sql, ids);
+        } catch (e) {
+          console.warn('Optional child cleanup skipped during bulk office delete:', e.message);
+        }
+      }
+
+      await db.query(`DELETE FROM officeproofdocuments WHERE officeid IN (${placeholders})`, ids);
+      await db.query(`DELETE FROM requirementuserassignments WHERE officeid IN (${placeholders})`, ids);
+      await db.query(`DELETE FROM compliancestatusoffices WHERE officeid IN (${placeholders})`, ids);
+      await db.query(`DELETE FROM officeheadassignments WHERE officeid IN (${placeholders})`, ids);
 
       const [result] = await db.query(`DELETE FROM offices WHERE officeid IN (${placeholders})`, ids);
 
@@ -1172,9 +1200,37 @@ const OfficesController = {
             });
         }
 
+        const { calculateBulkStandardCompliance } = require('../utils/evidenceService');
+        const reqIds = (results || []).map(r => r.requirementid);
+        const complianceMap = await calculateBulkStandardCompliance(db, reqIds, id);
+        const enrichedResults = (results || []).map(r => {
+            const comp = complianceMap.get(Number(r.requirementid)) || {
+                approvalRate: 0,
+                compliancePercentage: 0,
+                approvedCount: 0,
+                pendingCount: 0,
+                rejectedCount: 0,
+                activeCount: 0,
+                totalRecords: 0,
+                totalSubmittedCount: 0,
+                assignedPersonnelCount: 0,
+                hasEvidence: false,
+                hasActiveEvidence: false,
+                statusLabel: 'No Evidence Submitted',
+                derivedStatusId: 2,
+                derivedStatusName: 'Non-Existent'
+            };
+            return {
+                ...r,
+                ComplianceStatusID: comp.derivedStatusId,
+                ComplianceStatus: comp.derivedStatusName,
+                evidenceCompliance: comp
+            };
+        });
+
         res.json({
             success: true,
-            data: results
+            data: enrichedResults
         });
 
     } catch (err) {
@@ -1211,6 +1267,9 @@ const OfficesController = {
       }
 
       const officename = officeRows[0].officename || `Office ${officeid}`;
+      const isAuditorViewer = Number(req.user?.roleid) === 4;
+
+      await ensureEvidenceSchema().catch(() => {});
 
       const [requirementsRows] = await db.query(
         `SELECT
@@ -1247,6 +1306,90 @@ const OfficesController = {
         [officeid]
       );
 
+      // Fetch per-requirement evidence counts for automatic compliance calculation
+      const [evidenceRows] = await db.query(
+        `SELECT
+          requirementid,
+          COUNT(*)::int AS totalfiles,
+          SUM(CASE WHEN LOWER(COALESCE(reviewstatus, 'pending')) = 'approved' THEN 1 ELSE 0 END)::int AS approvedfiles
+         FROM officeproofdocuments
+         WHERE officeid = ?
+         GROUP BY requirementid`,
+        [officeid]
+      );
+
+      const evidenceByReq = new Map();
+      let officeTotalFiles = 0;
+      let officeApprovedFiles = 0;
+      for (const ev of evidenceRows || []) {
+        const reqId = Number(ev.requirementid);
+        const totalFiles = Number(ev.totalfiles || 0);
+        const approvedFiles = Number(ev.approvedfiles || 0);
+        evidenceByReq.set(reqId, { totalFiles, approvedFiles });
+        officeTotalFiles += totalFiles;
+        officeApprovedFiles += approvedFiles;
+      }
+
+      // Fetch file comments with author name & role
+      const [commentRows] = await db.query(
+        `SELECT
+          c.id,
+          c.comment,
+          u.roleid,
+          c.createdat,
+          d.requirementid,
+          COALESCE(NULLIF(TRIM(d.displayname), ''), d.filename, 'File') AS filename,
+          LOWER(COALESCE(d.reviewstatus, 'pending')) AS reviewstatus,
+          u.firstname,
+          u.middleinitial,
+          u.lastname
+         FROM officeproofdocumentcomments c
+         INNER JOIN officeproofdocuments d ON d.id = c.documentid
+         LEFT JOIN users u ON u.userid = c.userid
+         WHERE d.officeid = ?
+         ORDER BY c.createdat ASC, c.id ASC`,
+        [officeid]
+      );
+
+      const commentsByReq = new Map();
+      for (const c of commentRows || []) {
+        if (isAuditorViewer && c.reviewstatus !== 'approved') continue;
+        const reqId = Number(c.requirementid);
+        const authorName = formatUserName(c);
+        const roleId = Number(c.roleid || 0);
+        const roleLabel = roleId === 4 ? 'External Auditor' : (roleId === 1 ? 'Admin' : 'Staff');
+        const line = `[${c.filename}] ${authorName} (${roleLabel}): ${String(c.comment || '').trim()}`;
+        if (!commentsByReq.has(reqId)) commentsByReq.set(reqId, []);
+        commentsByReq.get(reqId).push(line);
+      }
+
+      // Fetch requirement-level comments with author name & role
+      const [reqCommentRows] = await db.query(
+        `SELECT
+          c.id,
+          c.requirementid,
+          c.comment,
+          u.roleid,
+          u.firstname,
+          u.middleinitial,
+          u.lastname
+         FROM requirementcomments c
+         LEFT JOIN users u ON u.userid = c.userid
+         WHERE c.officeid = ?
+         ORDER BY c.createdat ASC, c.id ASC`,
+        [officeid]
+      );
+
+      for (const c of reqCommentRows || []) {
+        const reqId = Number(c.requirementid);
+        const authorName = formatUserName(c);
+        const roleId = Number(c.roleid || 0);
+        const roleLabel = roleId === 4 ? 'External Auditor' : (roleId === 1 ? 'Admin' : 'Staff');
+        const line = `${authorName} (${roleLabel}): ${String(c.comment || '').trim()}`;
+        if (!commentsByReq.has(reqId)) commentsByReq.set(reqId, []);
+        commentsByReq.get(reqId).push(line);
+      }
+
       const workbook = new ExcelJS.Workbook();
       workbook.creator = 'Compliance Audit';
       workbook.created = new Date();
@@ -1255,9 +1398,9 @@ const OfficesController = {
       // Increase column widths to avoid truncation of long criteria/requirement titles.
       // Do not set any row heights here so the client can auto-size rows as needed.
       sheet.columns = [
-        { key: 'status', width: 20 },
-        { key: 'requirement', width: 140 },
-        { key: 'comments', width: 64 },
+        { key: 'status', width: 32 },
+        { key: 'requirement', width: 120 },
+        { key: 'comments', width: 72 },
       ];
 
       const thinBorder = {
@@ -1292,13 +1435,46 @@ const OfficesController = {
       sheet.getCell(`C${rowIndex}`).border = thinBorder;
       rowIndex += 1;
 
+      // Overall Compliance Summary row (averaged across all standards in this office)
+      const totalReqsCount = requirementsRows.length;
+      const sumReqPct = requirementsRows.reduce((acc, r) => {
+        const ev = evidenceByReq.get(Number(r.requirementid)) || { totalFiles: 0, approvedFiles: 0 };
+        const pct = ev.totalFiles > 0 ? (ev.approvedFiles / ev.totalFiles) * 100 : 0;
+        return acc + pct;
+      }, 0);
+      const officePct = totalReqsCount > 0 ? Number((sumReqPct / totalReqsCount).toFixed(2)) : 0;
+      const officeOverall = deriveComplianceStatus(officeTotalFiles, officePct);
+      sheet.mergeCells(`A${rowIndex}:C${rowIndex}`);
+      const summaryCell = sheet.getCell(`A${rowIndex}`);
+      summaryCell.value = `Overall Compliance: ${officePct}% — ${officeOverall.derivedStatusName} (${totalReqsCount} standards, ${officeApprovedFiles}/${officeTotalFiles} files approved)`;
+      summaryCell.font = { bold: true, size: 11 };
+      summaryCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      summaryCell.border = thinBorder;
+      sheet.getCell(`B${rowIndex}`).border = thinBorder;
+      sheet.getCell(`C${rowIndex}`).border = thinBorder;
+      rowIndex += 1;
+
+      // Column headers
+      sheet.getCell(`A${rowIndex}`).value = 'Compliance Status';
+      sheet.getCell(`B${rowIndex}`).value = 'Standard / Requirement';
+      sheet.getCell(`C${rowIndex}`).value = 'Comments (Author & Role)';
+      ['A', 'B', 'C'].forEach((col) => {
+        const hdr = sheet.getCell(`${col}${rowIndex}`);
+        hdr.font = { bold: true, size: 11 };
+        hdr.alignment = { horizontal: col === 'A' ? 'center' : 'left', vertical: 'middle' };
+        hdr.border = thinBorder;
+        hdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+      });
+      rowIndex += 1;
+
       if (!requirementsRows.length) {
-        sheet.mergeCells(`A${rowIndex}:B${rowIndex}`);
+        sheet.mergeCells(`A${rowIndex}:C${rowIndex}`);
         const emptyCell = sheet.getCell(`A${rowIndex}`);
         emptyCell.value = 'No requirements assigned to this office.';
         emptyCell.alignment = { horizontal: 'center', vertical: 'middle' };
         emptyCell.border = thinBorder;
         sheet.getCell(`B${rowIndex}`).border = thinBorder;
+        sheet.getCell(`C${rowIndex}`).border = thinBorder;
       } else {
         const areasMap = new Map();
 
@@ -1344,14 +1520,26 @@ const OfficesController = {
             });
           }
 
+          const reqId = Number(row.requirementid);
+          const evStats = evidenceByReq.get(reqId) || { totalFiles: 0, approvedFiles: 0 };
+          const reqPct = evStats.totalFiles > 0 ? Math.round((evStats.approvedFiles / evStats.totalFiles) * 100) : 0;
+          const derived = deriveComplianceStatus(evStats.totalFiles, reqPct);
+          const statusLabel = evStats.totalFiles > 0
+            ? `${derived.derivedStatusName} (${reqPct}% - ${evStats.approvedFiles}/${evStats.totalFiles})`
+            : derived.derivedStatusName;
+
+          const fileCommentLines = commentsByReq.get(reqId) || [];
+          const legacyComment = String(row.Comments ?? row.comments ?? '').trim();
+          const combinedComments = [...fileCommentLines];
+          if (legacyComment) {
+            combinedComments.push(`Legacy Note: ${legacyComment}`);
+          }
+
           areaEntry.criteriaMap.get(critId).requirements.push({
-            status: normalizeComplianceStatus(
-              row.ComplianceStatusID ?? row.compliancestatusid,
-              row.ComplianceStatusName ?? row.compliancestatusname
-            ),
+            status: statusLabel,
             requirementcode: row.requirementcode || 'N/A',
             description: row.Description ?? row.description ?? '',
-            comments: row.Comments ?? row.comments ?? ''
+            comments: combinedComments.join('\n')
           });
         });
 
@@ -1384,6 +1572,24 @@ const OfficesController = {
           // Sort roots by code then name
           roots.sort((a, b) => (String(a.code || a.name)).localeCompare(String(b.code || b.name)));
 
+          const writeRequirementRow = (req) => {
+            sheet.getCell(`A${rowIndex}`).value = req.status;
+            sheet.getCell(`B${rowIndex}`).value = {
+              richText: [
+                { text: `${req.requirementcode} - `, font: { bold: true } },
+                { text: String(req.description || '') },
+              ],
+            };
+            sheet.getCell(`C${rowIndex}`).value = req.comments || '';
+            sheet.getCell(`A${rowIndex}`).alignment = { horizontal: 'left', vertical: 'middle' };
+            sheet.getCell(`B${rowIndex}`).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+            sheet.getCell(`C${rowIndex}`).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+            sheet.getCell(`A${rowIndex}`).border = thinBorder;
+            sheet.getCell(`B${rowIndex}`).border = thinBorder;
+            sheet.getCell(`C${rowIndex}`).border = thinBorder;
+            rowIndex += 1;
+          };
+
           for (const root of roots) {
             // Criteria header (root)
             sheet.mergeCells(`A${rowIndex}:C${rowIndex}`);
@@ -1399,16 +1605,7 @@ const OfficesController = {
 
             // Write requirements directly under root (if any)
             for (const req of root.requirements) {
-              sheet.getCell(`A${rowIndex}`).value = req.status;
-              sheet.getCell(`B${rowIndex}`).value = `${req.requirementcode} - ${req.description}`;
-              sheet.getCell(`C${rowIndex}`).value = req.comments || '';
-              sheet.getCell(`A${rowIndex}`).alignment = { horizontal: 'left', vertical: 'middle' };
-              sheet.getCell(`B${rowIndex}`).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
-              sheet.getCell(`C${rowIndex}`).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
-              sheet.getCell(`A${rowIndex}`).border = thinBorder;
-              sheet.getCell(`B${rowIndex}`).border = thinBorder;
-              sheet.getCell(`C${rowIndex}`).border = thinBorder;
-              rowIndex += 1;
+              writeRequirementRow(req);
             }
 
             // For each child criteria under this root
@@ -1427,16 +1624,7 @@ const OfficesController = {
               rowIndex += 1;
 
               for (const req of child.requirements) {
-                sheet.getCell(`A${rowIndex}`).value = req.status;
-                sheet.getCell(`B${rowIndex}`).value = `${req.requirementcode} - ${req.description}`;
-                sheet.getCell(`C${rowIndex}`).value = req.comments || '';
-                sheet.getCell(`A${rowIndex}`).alignment = { horizontal: 'left', vertical: 'middle' };
-                sheet.getCell(`B${rowIndex}`).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
-                sheet.getCell(`C${rowIndex}`).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
-                sheet.getCell(`A${rowIndex}`).border = thinBorder;
-                sheet.getCell(`B${rowIndex}`).border = thinBorder;
-                sheet.getCell(`C${rowIndex}`).border = thinBorder;
-                rowIndex += 1;
+                writeRequirementRow(req);
               }
             }
           }

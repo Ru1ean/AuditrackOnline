@@ -3,6 +3,7 @@ import { Check } from 'lucide-react';
 import StatusBadge from './StatusBadge';
 import StatusSlider from './StatusSlider';
 import SmartUserAvatar from './SmartUserAvatar';
+import FileCommentsSection from './FileCommentsSection';
 import { API_BASE_URL } from '../../utils/apiBase';
 import { useModal } from '../UI/ModalProvider';
 
@@ -80,6 +81,7 @@ function RequirementHeaderAndDescription({
 }
 
 export default function RequirementsTree({
+    officeId = null,
     loading,
     requirements,
     searchTerm,
@@ -719,28 +721,48 @@ export default function RequirementsTree({
                                                 >
                                                     {/* Reuse existing requirement rendering block by inlining the minimal structure */}
                                                     <div className="flex items-stretch gap-3">
-                                                        <div className="min-w-[90px] flex flex-col">
-                                                            {isAdmin ? (
+                                                        <div className="min-w-[90px] flex flex-col justify-center">
+                                                            {isAdmin && req.evidenceCompliance ? (
                                                                 (() => {
-                                                                    const reqUsers = assignedUsersMap[req.requirementid] || [];
-                                                                    const hasUploadedEvidence = reqUsers.some(u => u?.hasuploaded === 1 || u?.hasuploaded === true) ||
-                                                                        Boolean(req.documentproof || req.ProofDocument || req.hasProof || req.has_proof || req.file_url);
-                                                                    const currentStatusId = Number(req.ComplianceStatusID) || 3;
-
+                                                                    const comp = req.evidenceCompliance;
+                                                                    const rate = Math.min(100, Math.max(0, Number(comp.approvalRate || 0)));
+                                                                    const sid = Number(comp.derivedStatusId ?? req.ComplianceStatusID ?? 2);
+                                                                    const theme = sid === 5
+                                                                        ? { pill: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500', bar: 'bg-gradient-to-r from-emerald-400 to-emerald-600', pct: 'text-emerald-700', label: 'Complied' }
+                                                                        : sid === 4
+                                                                        ? { pill: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-500', bar: 'bg-gradient-to-r from-amber-400 to-amber-500', pct: 'text-amber-700', label: 'Partial' }
+                                                                        : sid === 3
+                                                                        ? { pill: 'bg-rose-50 text-rose-700 border-rose-200', dot: 'bg-rose-500', bar: 'bg-rose-500', pct: 'text-rose-700', label: 'Not Complied' }
+                                                                        : { pill: 'bg-slate-100 text-slate-600 border-slate-200', dot: 'bg-slate-400', bar: 'bg-slate-300', pct: 'text-slate-500', label: 'Non-Existent' };
                                                                     return (
-                                                                        <StatusSlider
-                                                                            currentStatusId={currentStatusId}
-                                                                            disabled={!hasUploadedEvidence}
-                                                                            className="h-full"
-                                                                            onChange={(newStatusId) => handleStatusChange(req.requirementid, newStatusId)}
-                                                                            onDisabledClick={() => {
-                                                                                showAlert('Cannot change compliance status: No proof document has been uploaded for this standard yet.');
-                                                                            }}
-                                                                        />
+                                                                        <div className="w-44 rounded-xl border border-slate-200/90 bg-white/95 p-2.5 shadow-2xs">
+                                                                            <div className="flex items-center justify-between gap-1.5">
+                                                                                <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${theme.pill}`}>
+                                                                                    <span className={`h-1.5 w-1.5 rounded-full ${theme.dot}`} />
+                                                                                    {theme.label}
+                                                                                </span>
+                                                                                <span className={`text-xs font-bold tabular-nums ${theme.pct}`}>
+                                                                                    {rate}%
+                                                                                </span>
+                                                                            </div>
+                                                                            <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100 ring-1 ring-inset ring-slate-200/70">
+                                                                                <div
+                                                                                    className={`h-full rounded-full transition-all duration-300 ${theme.bar}`}
+                                                                                    style={{ width: `${rate}%` }}
+                                                                                />
+                                                                            </div>
+                                                                            <div className="mt-1.5 flex items-center justify-between text-[10px] font-medium text-slate-500">
+                                                                                <span className="text-emerald-700 font-semibold">{comp.approvedCount} Appr</span>
+                                                                                <span className="text-amber-700 font-semibold">{comp.pendingCount} Pend</span>
+                                                                                <span className="text-rose-700 font-semibold">{comp.rejectedCount} Rej</span>
+                                                                            </div>
+                                                                        </div>
                                                                     );
                                                                 })()
                                                             ) : (
-                                                                <StatusBadge statusid={req.ComplianceStatusID} />
+                                                                <StatusBadge
+                                                                    statusid={req.evidenceCompliance?.derivedStatusId ?? req.ComplianceStatusID}
+                                                                />
                                                             )}
                                                         </div>
 
@@ -754,162 +776,13 @@ export default function RequirementsTree({
                                                                 onToggleExpand={() => toggleExpandReq(req.requirementid)}
                                                             />
 
-                                                            {/* Comments display / edit */}
-                                                            {editingCommentId === req.requirementid && isAdmin ? (
-                                                                        <div className="mt-2" onClick={(e) => e.stopPropagation()}>
-                                                                            {req.comments ? (
-                                                                                <div className="mb-2 rounded-lg border border-slate-300/50 bg-slate-50 p-3 shadow-sm">
-                                                                                    <div className="flex items-center justify-between gap-2">
-                                                                                        <div className="text-[12px] font-semibold text-gray-800 flex items-center gap-2">
-                                                                                            <span>{commentLabel}</span>
-                                                                                            {savingComment && (
-                                                                                                <span className="text-[10px] font-medium text-indigo-600 animate-pulse flex items-center gap-1">
-                                                                                                    <svg className="animate-spin h-3 w-3 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                                                                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                                                                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                                                                                    </svg>
-                                                                                                    Updating...
-                                                                                                </span>
-                                                                                            )}
-                                                                                        </div>
-                                                                                        <button
-                                                                                            type="button"
-                                                                                            onClick={(e) => {
-                                                                                                e.stopPropagation();
-                                                                                                handleCommentClear?.(req);
-                                                                                            }}
-                                                                                            disabled={savingComment}
-                                                                                            className="rounded-md px-2 py-1 text-[11px] font-medium text-rose-600 transition hover:bg-rose-50 disabled:opacity-40 flex items-center gap-1"
-                                                                                        >
-                                                                                            {savingComment ? (
-                                                                                                <>
-                                                                                                    <svg className="animate-spin h-3 w-3 text-rose-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                                                                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                                                                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                                                                                    </svg>
-                                                                                                    <span>Clearing...</span>
-                                                                                                </>
-                                                                                            ) : (
-                                                                                                'Clear'
-                                                                                            )}
-                                                                                        </button>
-                                                                                    </div>
-                                                                                    <div className="mt-1 text-[13px] text-gray-800 break-words">{req.comments}</div>
-                                                                                </div>
-                                                                            ) : null}
-
-                                                                            <div className="rounded-full border border-slate-300/50 bg-slate-50 px-3 py-2 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                                                                                <input
-                                                                                    type="text"
-                                                                                    value={commentInput}
-                                                                                    onChange={handleCommentInputChange}
-                                                                                    onKeyDown={(e) => {
-                                                                                        if (e.key === 'Enter' && !savingComment) {
-                                                                                            e.preventDefault();
-                                                                                            handleCommentSave(req);
-                                                                                        }
-                                                                                        if (e.key === 'Escape' && !savingComment) {
-                                                                                            e.preventDefault();
-                                                                                            handleCommentCancel();
-                                                                                        }
-                                                                                    }}
-                                                                                    className="flex-1 bg-transparent outline-none text-[12px] text-gray-800 placeholder:text-gray-400 disabled:opacity-50"
-                                                                                    placeholder={savingComment ? "Saving comment..." : "Add private comment..."}
-                                                                                    disabled={savingComment}
-                                                                                />
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={(e) => {
-                                                                                        e.stopPropagation();
-                                                                                        handleCommentSave(req);
-                                                                                    }}
-                                                                                    disabled={savingComment || !String(commentInput || '').trim()}
-                                                                                    className="h-7 w-7 rounded-full flex items-center justify-center text-gray-600 hover:bg-gray-100 disabled:opacity-40"
-                                                                                    aria-label="Send comment"
-                                                                                    title={savingComment ? "Saving comment..." : "Send"}
-                                                                                >
-                                                                                    {savingComment ? (
-                                                                                        <svg className="animate-spin h-3.5 w-3.5 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                                                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                                                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                                                                        </svg>
-                                                                                    ) : (
-                                                                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                                                                            <path d="M3 12L21 3l-6 18-2.7-7.3L3 12Z" fill="currentColor" />
-                                                                                        </svg>
-                                                                                    )}
-                                                                                </button>
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={(e) => {
-                                                                                        e.stopPropagation();
-                                                                                        handleCommentCancel();
-                                                                                    }}
-                                                                                    disabled={savingComment}
-                                                                                    className="h-7 w-7 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100 disabled:opacity-40"
-                                                                                    aria-label="Cancel"
-                                                                                    title="Cancel"
-                                                                                >
-                                                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                                                                        <path d="M18 6 6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                                                                                    </svg>
-                                                                                </button>
-                                                                            </div>
-                                                                        </div>
-                                                                    ) : (
-                                                                        <div className="mt-2">
-                                                                            {req.comments ? (
-                                                                                <div
-                                                                                    onClick={(e) => {
-                                                                                        e.stopPropagation();
-                                                                                        if (isAdmin) handleCommentClick(req);
-                                                                                    }}
-                                                                                    role={isAdmin ? 'button' : undefined}
-                                                                                    tabIndex={isAdmin ? 0 : undefined}
-                                                                                    className={`rounded-lg border border-slate-300/50 bg-slate-50 p-3 shadow-sm ${isAdmin ? 'cursor-pointer' : ''}`}
-                                                                                >
-                                                                                    <div>
-                                                                                        <div className="flex items-center justify-between gap-2">
-                                                                                            <div className="text-[12px] font-semibold text-gray-800">{commentLabel}</div>
-                                                                                            {isAdmin ? (
-                                                                                                <button
-                                                                                                    type="button"
-                                                                                                    onClick={(e) => {
-                                                                                                        e.stopPropagation();
-                                                                                                        handleCommentClear?.(req);
-                                                                                                    }}
-                                                                                                    disabled={savingComment}
-                                                                                                    className="rounded-md px-2 py-1 text-[11px] font-medium text-rose-600 transition hover:bg-rose-50 disabled:opacity-40"
-                                                                                                >
-                                                                                                    Clear
-                                                                                                </button>
-                                                                                            ) : null}
-                                                                                        </div>
-                                                                                        <div className="mt-1 text-[13px] text-gray-800 break-words">{req.comments}</div>
-                                                                                    </div>
-                                                                                </div>
-                                                                            ) : (
-                                                                                isAdmin ? (
-                                                                                    <div
-                                                                                        onClick={(e) => {
-                                                                                            e.stopPropagation();
-                                                                                            handleCommentClick(req);
-                                                                                        }}
-                                                                                        role="button"
-                                                                                        tabIndex={0}
-                                                                                        className="rounded-full border border-slate-300/50 bg-slate-50 px-3 py-2 flex items-center gap-2 cursor-pointer"
-                                                                                    >
-                                                                                        <span className="flex-1 text-[12px] text-gray-400">Add private comment...</span>
-                                                                                        <span className="h-7 w-7 rounded-full flex items-center justify-center text-gray-400">
-                                                                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                                                                                <path d="M3 12L21 3l-6 18-2.7-7.3L3 12Z" fill="currentColor" />
-                                                                                            </svg>
-                                                                                        </span>
-                                                                                    </div>
-                                                                                ) : null
-                                                                            )}
-                                                                        </div>
-                                                                    )}
+                                                            {/* Facebook-style Requirement Comments */}
+                                                            <FileCommentsSection
+                                                                requirementid={req.requirementid}
+                                                                officeId={officeId}
+                                                                currentUser={currentUser}
+                                                                viewerRoleId={isAdmin ? 1 : (isAuditor ? 4 : 3)}
+                                                            />
                                                         </div>
 
                                                         <div className="flex flex-col items-end gap-1.5">

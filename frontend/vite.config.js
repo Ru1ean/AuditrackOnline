@@ -6,9 +6,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: true,
+    port: 5273,
+    allowedHosts: ['auditrack.com', '.auditrack.com', 'auditrack.local'],
     proxy: {
       '/api': {
-        target: process.env.VITE_BACKEND_PROXY_TARGET || 'http://localhost:5000',
+        target: process.env.VITE_API_BASE_URL,
         changeOrigin: true,
         secure: false,
       },

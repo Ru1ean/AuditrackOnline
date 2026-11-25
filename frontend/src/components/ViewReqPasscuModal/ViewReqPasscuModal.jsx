@@ -407,16 +407,25 @@ export default function ViewReqPASSCUModal({
         let complied = 0;
         let partially = 0;
         let notComplied = 0;
+        let totalEvidence = 0;
+        let sumPct = 0;
         reqsList.forEach(r => {
-            const s = Number(r.ComplianceStatusID ?? r.compliancestatusid ?? 3);
+            const c = r.evidenceCompliance || r.compliance;
+            const s = Number(c?.derivedStatusId ?? r.ComplianceStatusID ?? r.compliancestatusid ?? 3);
+            const pct = c
+                ? Number(c.compliancePercentage ?? c.approvalRate ?? 0)
+                : (s === 5 ? 100 : 0);
+            totalEvidence += Number(c?.totalRecords ?? c?.totalSubmittedCount ?? 0);
+            sumPct += pct;
             if (s === 5) complied++;
             else if (s === 4) partially++;
             else notComplied++;
         });
-        const compliancepercent = Number((((complied * 100) + (partially * 50)) / total).toFixed(2));
+        const compliancepercent = Number((sumPct / total).toFixed(2));
         let overallstatus = 'Partially Complied';
-        if (complied === total) overallstatus = 'Complied';
-        else if (notComplied === total) overallstatus = 'Not Complied';
+        if (totalEvidence === 0) overallstatus = 'Non-Existent';
+        else if (complied === total) overallstatus = 'Complied';
+        else if (compliancepercent === 0) overallstatus = 'Not Complied';
         return {
             totalrequirements: total,
             compliedcount: complied,
@@ -1571,6 +1580,7 @@ export default function ViewReqPASSCUModal({
 
                 {/* Requirements List */}
                 <RequirementsTree
+                    officeId={office?.id || office?.officeid}
                     loading={loading}
                     requirements={requirements}
                     searchTerm={searchTerm}
@@ -1898,6 +1908,24 @@ export default function ViewReqPASSCUModal({
                                 });
                             });
 
+                            if (res.data?.compliance && reqId) {
+                                setRequirements(prev => prev.map(r => {
+                                    if (Number(r.requirementid) !== Number(reqId)) return r;
+                                    const c = res.data.compliance;
+                                    return {
+                                        ...r,
+                                        compliance: c,
+                                        evidenceCompliance: c,
+                                        ComplianceStatusID: c.derivedStatusId ?? r.ComplianceStatusID,
+                                        ComplianceStatus: c.derivedStatusName ?? r.ComplianceStatus,
+                                        approvedcount: c.approvedCount ?? r.approvedcount,
+                                        pendingcount: c.pendingCount ?? r.pendingcount,
+                                        rejectedcount: c.rejectedCount ?? r.rejectedcount,
+                                    };
+                                }));
+                            }
+                            fetchOfficeRequirements(true).catch(() => {});
+
                             if (targetUserId && reqId) {
                                 window.dispatchEvent(new CustomEvent('evidence-file-reviewed', {
                                     detail: {
@@ -1906,6 +1934,7 @@ export default function ViewReqPASSCUModal({
                                         status: res.data.reviewstatus,
                                         userid: targetUserId,
                                         reason: res.data.rejectionreason,
+                                        compliance: res.data.compliance,
                                         resData: res.data
                                     }
                                 }));

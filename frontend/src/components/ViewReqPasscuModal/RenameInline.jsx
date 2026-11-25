@@ -44,9 +44,9 @@ export default function RenameInline({ item, onRename, forceEditing = false, onC
     };
 
     return (
-        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
             {isEditing ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
                     <input
                         type="text"
                         value={value}
@@ -59,7 +59,7 @@ export default function RenameInline({ item, onRename, forceEditing = false, onC
                                 doCancel();
                             }
                         }}
-                        className="rounded-full border px-2 py-1 text-xs outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-300 max-w-[140px] w-full"
+                        className="h-7 rounded-md border border-slate-300 bg-white px-2.5 text-xs text-slate-800 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-300 max-w-[160px] w-full"
                         style={{ minWidth: 0 }}
                         autoFocus
                         onClick={(e) => e.stopPropagation()}
@@ -67,24 +67,26 @@ export default function RenameInline({ item, onRename, forceEditing = false, onC
                     <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); handleSave(); }}
-                        className="rounded-md bg-blue-600 text-white px-2.5 py-1 text-xs cursor-pointer hover:bg-blue-700 transition"
+                        className="h-7 rounded-md bg-blue-600 text-white px-2.5 text-[11px] font-semibold cursor-pointer hover:bg-blue-700 transition-colors"
                     >Save</button>
-                    {/* Cancel via Escape key or clicking outside; explicit cancel button removed per request */}
-                </div>
-            ) : (
-                <>
                     <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); setEditing(true); if (typeof onStart === 'function') onStart(item); }}
-                        className="p-1 rounded-md hover:bg-rose-50 text-rose-600 border border-transparent"
-                        title="Rename"
-                    >
-                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M12 20h9" />
-                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-                        </svg>
-                    </button>
-                </>
+                        onClick={(e) => { e.stopPropagation(); doCancel(); }}
+                        className="h-7 rounded-md border border-slate-200 bg-white text-slate-600 px-2 text-[11px] font-medium cursor-pointer hover:bg-slate-50 transition-colors"
+                    >Cancel</button>
+                </div>
+            ) : (
+                <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setEditing(true); if (typeof onStart === 'function') onStart(item); }}
+                    className="h-7 w-7 shrink-0 rounded-md border border-slate-200 bg-white text-slate-500 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 flex items-center justify-center transition-colors cursor-pointer"
+                    title="Rename file"
+                >
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                    </svg>
+                </button>
             )}
         </div>
     );

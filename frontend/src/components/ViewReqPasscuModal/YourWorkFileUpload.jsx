@@ -1,8 +1,11 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Check } from 'lucide-react';
+import api from '../../utils/api';
 import { API_BASE_URL } from '../../utils/apiBase';
 import { useToast } from '../UI/Toast';
 import RenameInline from './RenameInline';
+import EvidenceHistoryModal from './EvidenceHistoryModal';
+import FileCommentsSection from './FileCommentsSection';
 
 const getExtension = (fileNameOrUrl) => {
     const s = String(fileNameOrUrl || '');
@@ -54,6 +57,10 @@ export default function YourWorkFileUpload({
 }) {
     const { toast } = useToast();
     const inputId = `your-work-file-${requirementid}`;
+    const resubmitInputRef = useRef(null);
+    const [resubmitTarget, setResubmitTarget] = useState(null);
+    const [resubmittingId, setResubmittingId] = useState(null);
+    const [historyFile, setHistoryFile] = useState(null);
     const [editingFileId, setEditingFileId] = useState(null);
     const [titleInput, setTitleInput] = useState('');
     const [expandedComments, setExpandedComments] = useState({});
@@ -63,11 +70,11 @@ export default function YourWorkFileUpload({
             const stored = localStorage.getItem('user');
             const currentUser = stored ? JSON.parse(stored) : null;
             if (!currentUser) return false;
-            return currentUser.roleid === 4 || 
-                   Number(currentUser.roleid) === 4 ||
-                   String(currentUser.rolename || '').toLowerCase().includes('auditor') || 
-                   String(currentUser.Position || '').toLowerCase().includes('auditor') ||
-                   Boolean(currentUser.isExternalAuditor);
+            return currentUser.roleid === 4 ||
+                Number(currentUser.roleid) === 4 ||
+                String(currentUser.rolename || '').toLowerCase().includes('auditor') ||
+                String(currentUser.Position || '').toLowerCase().includes('auditor') ||
+                Boolean(currentUser.isExternalAuditor);
         } catch {
             return false;
         }
@@ -75,8 +82,8 @@ export default function YourWorkFileUpload({
 
     // Normalize files list: support either files array or single file prop
     const rawFileList = useMemo(() => {
-        const list = Array.isArray(files) && files.length > 0 
-            ? files 
+        const list = Array.isArray(files) && files.length > 0
+            ? files
             : (file ? [file] : []);
         return isAuditorUser ? list.filter(f => f && f.reviewstatus === 'approved') : list;
     }, [files, file, isAuditorUser]);
@@ -162,7 +169,7 @@ export default function YourWorkFileUpload({
                 const token = localStorage.getItem('token');
                 await fetch(`${API_BASE_URL}/api/requirements/${requirementid}/user-file/${targetUserId}/reorder`, {
                     method: 'PATCH',
-                    headers: { 
+                    headers: {
                         'Content-Type': 'application/json',
                         ...(token ? { Authorization: `Bearer ${token}` } : {})
                     },
@@ -268,7 +275,7 @@ export default function YourWorkFileUpload({
                         <span className="text-sm font-semibold text-slate-800">Standard Files</span>
                         {localFiles.length > 0 && (
                             <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
-                                {localFiles.length}/40 uploaded
+                                {localFiles.filter(f => String(f?.reviewstatus || 'pending').toLowerCase() !== 'rejected').length}/40 active
                             </span>
                         )}
                     </div>
@@ -282,7 +289,12 @@ export default function YourWorkFileUpload({
             {localFiles.length > 0 && (
                 <div className="space-y-3 mb-3">
                     {localFiles.map((item, index) => {
-                        const fileUrl = item.url || item.filepath || '';
+                        const rawFileUrl = String(item.url || item.filepath || '').trim();
+                        const fileUrl = rawFileUrl
+                            ? (/^https?:\/\//i.test(rawFileUrl) || rawFileUrl.startsWith('data:') || rawFileUrl.startsWith('blob:')
+                                ? rawFileUrl
+                                : `${API_BASE_URL}${rawFileUrl.startsWith('/') ? '' : '/'}${rawFileUrl}`)
+                            : '';
                         const ext = getExtension(item.filename || fileUrl);
                         const displayTitle = item.displayname || item.filename || `Document ${index + 1}`;
                         const isEditingThis = editingFileId === (item.id || item.filename);
@@ -304,13 +316,12 @@ export default function YourWorkFileUpload({
                                 onDrop={(e) => handleDrop(e, index)}
                                 onDragEnd={handleDragEnd}
                                 onClick={() => onViewFile?.(item)}
-                                className={`group/card cursor-pointer flex flex-col gap-2.5 rounded-xl border bg-white p-3.5 shadow-2xs transition-all ${
-                                    draggedIdx === index ? 'opacity-40 scale-[0.98] border-dashed border-blue-400 bg-blue-50/20' : 
-                                    dragOverIdx === index ? 'border-blue-500 ring-2 ring-blue-400/50 shadow-md scale-[1.01]' : 
-                                    !isAuditorUser && isRejected ? 'border-rose-300/80 bg-rose-50/10 hover:border-rose-400 hover:shadow-md' :
-                                    !isAuditorUser && isApproved ? 'border-emerald-200/80 bg-emerald-50/10 hover:border-emerald-400 hover:shadow-md' :
-                                    'border-slate-200/90 hover:border-blue-400 hover:shadow-md hover:bg-blue-50/20'
-                                } ${compact ? 'text-xs' : ''}`}
+                                className={`group/card cursor-pointer flex flex-col gap-2.5 rounded-xl border bg-white p-3.5 shadow-2xs transition-all ${draggedIdx === index ? 'opacity-40 scale-[0.98] border-dashed border-blue-400 bg-blue-50/20' :
+                                    dragOverIdx === index ? 'border-blue-500 ring-2 ring-blue-400/50 shadow-md scale-[1.01]' :
+                                        !isAuditorUser && isRejected ? 'border-rose-300/80 bg-rose-50/10 hover:border-rose-400 hover:shadow-md' :
+                                            !isAuditorUser && isApproved ? 'border-emerald-200/80 bg-emerald-50/10 hover:border-emerald-400 hover:shadow-md' :
+                                                'border-slate-200/90 hover:border-blue-400 hover:shadow-md hover:bg-blue-50/20'
+                                    } ${compact ? 'text-xs' : ''}`}
                             >
                                 {/* Top Review Badge Header */}
                                 <div className="flex items-center justify-between gap-2">
@@ -335,8 +346,8 @@ export default function YourWorkFileUpload({
                                         {!isAuditorUser && !isApproved && !isRejected && (
                                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 shadow-2xs">
                                                 <svg className="w-3 h-3 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                                    <circle cx="12" cy="12" r="9"/>
-                                                    <polyline points="12 7 12 12 15 14"/>
+                                                    <circle cx="12" cy="12" r="9" />
+                                                    <polyline points="12 7 12 12 15 14" />
                                                 </svg>
                                                 Pending Review
                                             </span>
@@ -349,7 +360,7 @@ export default function YourWorkFileUpload({
 
                                 <div className="flex items-center justify-between gap-3">
                                     {!readOnly && localFiles.length > 1 && (
-                                        <div 
+                                        <div
                                             className="cursor-grab active:cursor-grabbing text-slate-300 group-hover/card:text-slate-500 flex items-center justify-center pt-3 shrink-0 transition-colors"
                                             title="Drag up/down to reorder file"
                                             onClick={(e) => e.stopPropagation()}
@@ -360,17 +371,16 @@ export default function YourWorkFileUpload({
                                         </div>
                                     )}
                                     <div className="min-w-0 flex-1 flex items-start gap-3">
-                                        <div className={`h-11 w-11 shrink-0 rounded-lg border bg-slate-50 flex items-center justify-center overflow-hidden shadow-2xs group-hover/card:border-blue-300 ${
-                                            isApproved ? 'border-emerald-200 bg-emerald-50/40' :
+                                        <div className={`h-11 w-11 shrink-0 rounded-lg border bg-slate-50 flex items-center justify-center overflow-hidden shadow-2xs group-hover/card:border-blue-300 ${isApproved ? 'border-emerald-200 bg-emerald-50/40' :
                                             isRejected ? 'border-rose-200 bg-rose-50/40' :
-                                            'border-slate-200'
-                                        }`}>
+                                                'border-slate-200'
+                                            }`}>
                                             {isImageExt(ext) && fileUrl ? (
                                                 <img src={fileUrl} alt="" className="h-full w-full object-cover" />
                                             ) : isVideoExt(ext) ? (
                                                 <div className="h-full w-full bg-slate-900 flex items-center justify-center text-white">
                                                     <svg className="w-5 h-5 text-indigo-400 fill-current" viewBox="0 0 24 24">
-                                                        <path d="M8 5v14l11-7z"/>
+                                                        <path d="M8 5v14l11-7z" />
                                                     </svg>
                                                 </div>
                                             ) : (
@@ -388,17 +398,50 @@ export default function YourWorkFileUpload({
                                                 </div>
                                             )}
 
-                                            <div className="mt-1 flex items-center gap-2 text-[10px] font-medium text-slate-500">
-                                                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">{getFileTypeLabel(ext)}</span>
-                                                <span>•</span>
-                                                <span className="truncate max-w-[260px] text-slate-400">{item.filename || 'file'}</span>
+                                            <div className="mt-1 flex items-center gap-1.5 min-w-0 text-[10px] font-medium text-slate-500">
+                                                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600 whitespace-nowrap shrink-0">{getFileTypeLabel(ext)}</span>
+                                                <span className="shrink-0">•</span>
+                                                <span className="truncate min-w-0 text-slate-400">{item.filename || 'file'}</span>
                                             </div>
                                         </div>
                                     </div>
 
-                                    <div className="flex items-center gap-1">
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                        {item.id && Number(item.currentversion || 1) > 1 && (
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setHistoryFile(item);
+                                                }}
+                                                className="h-7 px-2.5 shrink-0 whitespace-nowrap rounded-md border border-slate-200 bg-white text-[11px] font-semibold text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 flex items-center justify-center transition-colors cursor-pointer"
+                                                title="View submission and review history"
+                                            >
+                                                History (v{item.currentversion})
+                                            </button>
+                                        )}
+
+                                        {!readOnly && isRejected && !isAuditorUser && item.id && (
+                                            <button
+                                                type="button"
+                                                disabled={resubmittingId === item.id}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setResubmitTarget(item);
+                                                    if (resubmitInputRef.current) {
+                                                        resubmitInputRef.current.value = '';
+                                                        resubmitInputRef.current.click();
+                                                    }
+                                                }}
+                                                className="h-7 px-2.5 shrink-0 rounded-md border border-blue-600 bg-blue-600 text-[11px] font-semibold text-white hover:bg-blue-700 flex items-center justify-center transition-colors disabled:opacity-50 cursor-pointer"
+                                                title="Upload a revised file for this rejected evidence"
+                                            >
+                                                {resubmittingId === item.id ? 'Resubmitting...' : 'Resubmit'}
+                                            </button>
+                                        )}
+
                                         {!readOnly && (
-                                            <div onClick={(e) => e.stopPropagation()}>
+                                            <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
                                                 <RenameInline
                                                     item={item}
                                                     forceEditing={isEditingThis}
@@ -427,10 +470,10 @@ export default function YourWorkFileUpload({
                                                     }
                                                 }}
                                                 disabled={unsubmitting}
-                                                className="h-7 w-7 shrink-0 rounded-md border border-slate-200 bg-white text-slate-400 hover:border-red-200 hover:bg-red-50 hover:text-red-600 flex items-center justify-center transition-colors disabled:opacity-50 cursor-pointer"
+                                                className="h-7 w-7 shrink-0 rounded-md border border-slate-200 bg-white text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600 flex items-center justify-center transition-colors disabled:opacity-50 cursor-pointer"
                                                 title="Remove this file"
                                             >
-                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
                                                     <path d="M18 6 6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                                                 </svg>
                                             </button>
@@ -439,8 +482,8 @@ export default function YourWorkFileUpload({
                                 </div>
 
                                 {/* Rejection Feedback Banner (if rejected) */}
-                                {isRejected && !isAuditorUser && (item.rejectionreason || commentText) ? (
-                                    <div 
+                                {isRejected && !isAuditorUser && (item.rejectionreason || commentText) && (
+                                    <div
                                         className="rounded-lg bg-rose-50 border border-rose-200/90 p-2.5 text-xs text-rose-900 flex flex-col gap-1 shadow-2xs"
                                         onClick={(e) => e.stopPropagation()}
                                     >
@@ -457,49 +500,14 @@ export default function YourWorkFileUpload({
                                             <span className="text-[10px] text-rose-500 pl-5 font-normal">Reviewed by: {item.reviewerName}</span>
                                         )}
                                     </div>
-                                ) : (!isAuditorUser && (
-                                    /* Dedicated Multi-Line Per-File Comment Section (Only when not rejected) */
-                                    <div 
-                                        className="mt-1.5 pt-2 border-t border-slate-100 flex flex-col gap-1"
-                                        onClick={(e) => e.stopPropagation()}
-                                    >
-                                        <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700">
-                                            <span>{isApproved ? 'Auditor Note:' : 'Comment:'}</span>
-                                            {isLongComment && !isAdmin && (
-                                                <button
-                                                    type="button"
-                                                    onClick={(e) => toggleExpandComment(e, fileIdKey)}
-                                                    className="text-[10px] font-medium text-blue-600 hover:underline"
-                                                >
-                                                    {isExpanded ? 'Show less' : 'Show more'}
-                                                </button>
-                                            )}
-                                        </div>
-
-                                        {isAdmin ? (
-                                            <textarea
-                                                rows={2}
-                                                defaultValue={commentText}
-                                                onBlur={(e) => handleSaveComment(item, e.target.value)}
-                                                spellCheck={false}
-                                                autoCorrect="off"
-                                                autoCapitalize="off"
-                                                placeholder="Add auditor feedback comment (supports multiple lines)..."
-                                                className="w-full rounded-lg border border-slate-200 bg-slate-50/80 p-2 text-xs font-medium text-slate-800 shadow-2xs focus:border-blue-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 resize-y min-h-[54px]"
-                                            />
-                                        ) : (
-                                            <div className="w-full rounded-lg border border-slate-100 bg-slate-50/90 p-2.5 text-xs text-slate-700 font-medium break-words break-all [overflow-wrap:anywhere] whitespace-pre-wrap leading-relaxed">
-                                                {commentText ? (
-                                                    <span className={!isExpanded && isLongComment ? 'line-clamp-2' : ''}>
-                                                        {commentText}
-                                                    </span>
-                                                ) : (
-                                                    <span className="italic text-slate-400 font-normal">No comment from auditor</span>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
+                                )}
+                                <FileCommentsSection
+                                    requirementid={requirementid}
+                                    file={item}
+                                    viewerRoleId={isAdmin ? 1 : (isAuditorUser ? 4 : 3)}
+                                    compactCard={true}
+                                    hideWhenEmpty={isRejected}
+                                />
                             </div>
                         );
                     })}
@@ -573,6 +581,60 @@ export default function YourWorkFileUpload({
             {!readOnly && (
                 <>
                     <input
+                        ref={resubmitInputRef}
+                        type="file"
+                        accept=".pdf,.doc,.docx,.xlsx,.xls,.jpg,.jpeg,.png,.gif,.mp4,.webm,.ogg,.mov,.avi,.mkv"
+                        className="hidden"
+                        onChange={async (e) => {
+                            const selectedFile = e.target.files?.[0];
+                            const target = resubmitTarget;
+                            e.target.value = '';
+                            if (!selectedFile || !target?.id || !requirementid) return;
+                            setResubmittingId(target.id);
+                            try {
+                                const formData = new FormData();
+                                formData.append('file', selectedFile);
+                                const res = await api.post(
+                                    `/api/requirements/${requirementid}/file/${target.id}/resubmit`,
+                                    formData,
+                                    { headers: { 'Content-Type': 'multipart/form-data' } }
+                                );
+                                if (res.data?.success && res.data?.file) {
+                                    const updatedFile = res.data.file;
+                                    setLocalFiles((prev) => {
+                                        const next = prev.map((f) => (f.id === target.id ? { ...f, ...updatedFile } : f));
+                                        onReorder?.(next);
+                                        return next;
+                                    });
+                                    window.dispatchEvent(new CustomEvent('evidence-file-reviewed', {
+                                        detail: { reqId: requirementid, fileId: target.id, status: 'pending', compliance: res.data.compliance }
+                                    }));
+                                    toast?.({
+                                        title: 'Evidence Resubmitted',
+                                        description: `Version ${updatedFile.currentversion || 2} submitted and is now pending review.`,
+                                        variant: 'success',
+                                        duration: 3000,
+                                    });
+                                } else {
+                                    toast?.({
+                                        title: 'Resubmission Failed',
+                                        description: res.data?.message || 'Could not resubmit evidence.',
+                                        variant: 'error',
+                                    });
+                                }
+                            } catch (err) {
+                                toast?.({
+                                    title: 'Resubmission Failed',
+                                    description: err.response?.data?.message || err.message || 'Could not resubmit evidence.',
+                                    variant: 'error',
+                                });
+                            } finally {
+                                setResubmittingId(null);
+                                setResubmitTarget(null);
+                            }
+                        }}
+                    />
+                    <input
                         id={inputId}
                         type="file"
                         accept=".pdf,.doc,.docx,.xlsx,.xls,.jpg,.jpeg,.png,.gif,.mp4,.webm,.ogg,.mov,.avi,.mkv"
@@ -581,9 +643,9 @@ export default function YourWorkFileUpload({
                         className="hidden"
                         disabled={isUploading}
                     />
-                    {localFiles.length >= 40 ? (
+                    {localFiles.filter(f => String(f?.reviewstatus || 'pending').toLowerCase() !== 'rejected').length >= 40 ? (
                         <div className="w-full text-center py-2.5 px-3 rounded-xl border border-slate-200 bg-slate-100/80 text-xs font-semibold text-slate-500">
-                            Maximum limit reached (40/40 files uploaded)
+                            Maximum active limit reached (40/40 active files uploaded)
                         </div>
                     ) : (
                         <label
@@ -603,13 +665,25 @@ export default function YourWorkFileUpload({
                                     <svg className="h-4 w-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                                     </svg>
-                                    <span>{localFiles.length > 0 ? `+ Add More Standard Files (${localFiles.length}/40)` : '+ Select Standard File(s) (Max 40)'}</span>
+                                    <span>
+                                        {(() => {
+                                            const activeCnt = localFiles.filter(f => String(f?.reviewstatus || 'pending').toLowerCase() !== 'rejected').length;
+                                            return activeCnt > 0 ? `+ Add More Standard Files (${activeCnt}/40 active)` : '+ Select Standard File(s) (Max 40 active)';
+                                        })()}
+                                    </span>
                                 </>
                             )}
                         </label>
                     )}
                 </>
             )}
+
+            <EvidenceHistoryModal
+                show={Boolean(historyFile)}
+                onClose={() => setHistoryFile(null)}
+                requirementid={requirementid}
+                file={historyFile}
+            />
         </div>
     );
 }

@@ -34,7 +34,8 @@ export default function OfficeInfoBar({
             const score = Number(rawPct);
             const status =
                 officeData?.overallstatus === 'Complied' ? 5 :
-                officeData?.overallstatus === 'Partially Complied' ? 4 : 3;
+                officeData?.overallstatus === 'Partially Complied' ? 4 :
+                officeData?.overallstatus === 'Non-Existent' ? 2 : 3;
 
             return {
                 complianceNum: score,
@@ -44,6 +45,41 @@ export default function OfficeInfoBar({
         }
 
         if (Array.isArray(requirements) && requirements.length > 0) {
+            const hasEvidenceMetrics = requirements.some(r => r?.evidenceCompliance !== undefined || r?.compliance !== undefined);
+            if (hasEvidenceMetrics) {
+                const total = totalOfficeReqs > requirements.length ? totalOfficeReqs : requirements.length;
+                let totalSubmitted = 0;
+                let totalApproved = 0;
+                let compliedCount = 0;
+                let sumPct = 0;
+
+                requirements.forEach((r) => {
+                    const ec = r?.evidenceCompliance || r?.compliance;
+                    const recTotal = Number(ec?.totalRecords ?? ec?.totalSubmittedCount ?? 0);
+                    const recAppr = Number(ec?.approvedCount ?? 0);
+                    const recPct = recTotal > 0 ? (recAppr / recTotal) * 100 : 0;
+                    totalSubmitted += recTotal;
+                    totalApproved += recAppr;
+                    sumPct += recPct;
+                    if (recTotal > 0 && recAppr === recTotal) {
+                        compliedCount += 1;
+                    }
+                });
+
+                const score = total > 0 ? sumPct / total : 0;
+                let status = 2; // Non-Existent
+                if (totalSubmitted > 0) {
+                    if (compliedCount === total && total > 0) status = 5;
+                    else if (totalApproved === 0) status = 3;
+                    else status = 4;
+                }
+                return {
+                    complianceNum: score,
+                    compliance: `${score.toFixed(1)}%`,
+                    statusid: status
+                };
+            }
+
             const total = totalOfficeReqs > requirements.length ? totalOfficeReqs : requirements.length;
             const complied = requirements.filter(r => {
                 const s = Number(r.ComplianceStatusID ?? r.complianceStatusId ?? r.Status ?? r.status);
@@ -79,7 +115,8 @@ export default function OfficeInfoBar({
         const score = rawPct !== undefined && rawPct !== null && !isNaN(Number(rawPct)) ? Number(rawPct) : 0;
         const status =
             officeData?.overallstatus === 'Complied' ? 5 :
-            officeData?.overallstatus === 'Partially Complied' ? 4 : 3;
+            officeData?.overallstatus === 'Partially Complied' ? 4 :
+            officeData?.overallstatus === 'Non-Existent' ? 2 : 3;
 
         return {
             complianceNum: score,

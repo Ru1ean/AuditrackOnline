@@ -69,13 +69,12 @@ export default function Navbar({ isMobileMenuOpen: propIsMobileMenuOpen, setIsMo
     }, [expandOnHover]);
 
     // Unified logout function
-    const handleLogout = () => {
-        try {
-            usersAPI.logout?.().catch(() => {});
-        } catch {}
+    const handleLogout = async () => {
+        await usersAPI.logout();
         localStorage.removeItem("token");
         localStorage.removeItem("user");
         localStorage.removeItem("sessionId");
+        localStorage.removeItem("name");
         delete axios.defaults.headers.common["Authorization"];
         navigate("/login");
     };

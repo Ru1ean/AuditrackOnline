@@ -1,35 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navigation/navbar';
 import Header from '../components/Header/header';
-import { socket } from '../utils/socket';
-import { dataCache } from '../utils/dataCache';
-
-function getCurrentTokenSid() {
-    try {
-        const storedSid = localStorage.getItem('sessionId');
-        if (storedSid) return storedSid;
-        const token = localStorage.getItem('token');
-        if (!token) return null;
-        const payloadPart = token.split('.')[1];
-        if (!payloadPart) return null;
-        const decoded = JSON.parse(atob(payloadPart.replace(/-/g, '+').replace(/_/g, '/')));
-        return decoded?.sid || null;
-    } catch {
-        return null;
-    }
-}
-
-function getCurrentUserId() {
-    try {
-        const raw = localStorage.getItem('user');
-        if (!raw) return null;
-        const parsed = JSON.parse(raw);
-        return Number(parsed?.userid ?? parsed?.UserID ?? parsed?.id ?? 0) || null;
-    } catch {
-        return null;
-    }
-}
+import '../utils/socket';
 
 function checkIsAdminUser(user) {
     if (!user) return false;
@@ -49,6 +22,7 @@ function getStoredIsAdmin() {
 }
 
 export default function AppLayout() {
+    const navigate = useNavigate();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isAdmin, setIsAdmin] = useState(getStoredIsAdmin);
 
@@ -67,42 +41,19 @@ export default function AppLayout() {
         syncAdminStatus();
 
         const onStorage = (e) => {
-            if (e.key === 'user') syncAdminStatus();
-            if (e.key === 'token' && !e.newValue && window.location.pathname !== '/login') {
-                window.location.href = '/login';
+            if (e.key === 'token' && !e.newValue) {
+                navigate('/login', { replace: true });
+                return;
             }
+            if (e.key === 'user') syncAdminStatus();
         };
         const onProfileUpdated = () => syncAdminStatus();
 
-        const onSessionReplaced = (payload) => {
-            const myUserId = getCurrentUserId();
-            if (!myUserId || Number(payload?.userid) !== myUserId) return;
-
-            const mySid = getCurrentTokenSid();
-            if (payload?.newSid && mySid !== payload.newSid) {
-                try {
-                    sessionStorage.setItem(
-                        'sessionReplacedMessage',
-                        'Your session has ended because your account was signed in on another browser or device.'
-                    );
-                } catch {}
-                localStorage.removeItem('token');
-                localStorage.removeItem('user');
-                localStorage.removeItem('sessionId');
-                try { dataCache.clear(); } catch {}
-                if (window.location.pathname !== '/login') {
-                    window.location.href = '/login';
-                }
-            }
-        };
-
         window.addEventListener('storage', onStorage);
         window.addEventListener('profileUpdated', onProfileUpdated);
-        socket.on('session_replaced', onSessionReplaced);
         return () => {
             window.removeEventListener('storage', onStorage);
             window.removeEventListener('profileUpdated', onProfileUpdated);
-            socket.off('session_replaced', onSessionReplaced);
         };
     }, []);
 

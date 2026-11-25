@@ -18,6 +18,7 @@ export default function RegisterAuditor() {
         lastname: "",
         email: "",
         password: "",
+        confirmPassword: "",
         roleid: "4" // Fixed to Auditor role (4)
     });
     const [error, setError] = useState("");
@@ -25,8 +26,10 @@ export default function RegisterAuditor() {
     const [inviteChecking, setInviteChecking] = useState(Boolean(inviteToken));
     const [inviteInfo, setInviteInfo] = useState(null);
     const [passwordError, setPasswordError] = useState("");
+    const [confirmPasswordError, setConfirmPasswordError] = useState("");
     const [emailError, setEmailError] = useState("");
     const [showPassword, setShowPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
     useEffect(() => {
         if (!inviteToken) return;
@@ -75,8 +78,17 @@ export default function RegisterAuditor() {
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        setFormData({ ...formData, [name]: value });
-        if (name === 'password') validatePassword(value);
+        const nextForm = { ...formData, [name]: value };
+        setFormData(nextForm);
+        if (name === 'password') {
+            validatePassword(value);
+            if (nextForm.confirmPassword) {
+                setConfirmPasswordError(value === nextForm.confirmPassword ? "" : "Passwords do not match");
+            }
+        }
+        if (name === 'confirmPassword') {
+            setConfirmPasswordError(value && value !== nextForm.password ? "Passwords do not match" : "");
+        }
         if (name === 'email') validateEmail(value);
     };
 
@@ -118,6 +130,12 @@ export default function RegisterAuditor() {
         if (!validatePassword(formData.password)) {
             setLoading(false);
             setError("Please fix the password errors before submitting");
+            return;
+        }
+        if (formData.password !== formData.confirmPassword) {
+            setLoading(false);
+            setConfirmPasswordError("Passwords do not match");
+            setError("Passwords do not match");
             return;
         }
 
@@ -336,23 +354,60 @@ export default function RegisterAuditor() {
                                 </div>
                             </div>
 
+                            {/* Confirm Password */}
+                            <div>
+                                <label htmlFor="confirmPassword" style={labelStyle}>Confirm Password *</label>
+                                <div style={{ position: 'relative' }}>
+                                    <input
+                                        type={showConfirmPassword ? "text" : "password"}
+                                        id="confirmPassword" name="confirmPassword" required
+                                        value={formData.confirmPassword} onChange={handleChange}
+                                        placeholder="Re-enter your password"
+                                        style={{ ...inputStyle(Boolean(confirmPasswordError)), paddingRight: '2.5rem' }}
+                                        onFocus={e => { if (!confirmPasswordError) { e.target.style.borderColor = '#2563eb'; e.target.style.boxShadow = '0 0 0 3px rgba(37,99,235,0.12)'; }}}
+                                        onBlur={e => { e.target.style.borderColor = confirmPasswordError ? '#fca5a5' : '#e2e8f0'; e.target.style.boxShadow = 'none'; }}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowConfirmPassword(v => !v)}
+                                        style={{
+                                            position: 'absolute', right: '0.75rem', top: '50%',
+                                            transform: 'translateY(-50%)',
+                                            background: 'none', border: 'none', cursor: 'pointer',
+                                            color: '#94a3b8', padding: 0, display: 'flex',
+                                        }}
+                                        aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                                    >
+                                        {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                    </button>
+                                </div>
+                                {confirmPasswordError ? (
+                                    <p style={{ marginTop: '0.3rem', fontSize: '0.72rem', color: '#dc2626' }}>{confirmPasswordError}</p>
+                                ) : formData.confirmPassword && formData.password === formData.confirmPassword ? (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.35rem', fontSize: '0.72rem', color: '#16a34a' }}>
+                                        <CheckCircle2 size={13} />
+                                        Passwords match
+                                    </div>
+                                ) : null}
+                            </div>
+
                             {/* Submit */}
                             <button
                                 type="submit"
-                                disabled={loading || Boolean(passwordError) || Boolean(emailError)}
+                                disabled={loading || Boolean(passwordError) || Boolean(confirmPasswordError) || Boolean(emailError)}
                                 style={{
                                     width: '100%', padding: '0.75rem',
                                     borderRadius: '10px', border: 'none',
-                                    cursor: loading || passwordError || emailError ? 'not-allowed' : 'pointer',
+                                    cursor: loading || passwordError || confirmPasswordError || emailError ? 'not-allowed' : 'pointer',
                                     fontWeight: 600, fontSize: '0.9rem', color: '#fff',
-                                    background: loading || passwordError || emailError
+                                    background: loading || passwordError || confirmPasswordError || emailError
                                         ? '#94a3b8'
                                         : 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
-                                    boxShadow: loading || passwordError || emailError ? 'none' : '0 4px 14px rgba(22,163,74,0.3)',
+                                    boxShadow: loading || passwordError || confirmPasswordError || emailError ? 'none' : '0 4px 14px rgba(22,163,74,0.3)',
                                     transition: 'all 0.2s',
                                     marginTop: '0.25rem',
                                 }}
-                                onMouseEnter={e => { if (!loading && !passwordError && !emailError) { e.target.style.transform = 'translateY(-1px)'; e.target.style.boxShadow = '0 6px 20px rgba(22,163,74,0.4)'; }}}
+                                onMouseEnter={e => { if (!loading && !passwordError && !confirmPasswordError && !emailError) { e.target.style.transform = 'translateY(-1px)'; e.target.style.boxShadow = '0 6px 20px rgba(22,163,74,0.4)'; }}}
                                 onMouseLeave={e => { e.target.style.transform = 'translateY(0)'; }}
                             >
                                 {loading ? "Creating Account…" : "Create Account"}
